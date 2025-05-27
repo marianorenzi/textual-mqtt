@@ -36,27 +36,14 @@ class MqttClient(Widget):
     def on_mount(self) -> None:
         self.connect()
 
+    def on_unmount(self) -> None:
+        self.client.disconnect()
+
     @work(thread=True, group="mqtt")
     async def connect(self):
-        try:
-            self.ready = self.app._dom_ready  # type: ignore[unused-ignore]
-        except NoActiveAppError:
-            raise NoActiveAppError("No active app. Window manager has launched too early. Library bug.")
-        except Exception as e:
-            self.log.error(f"Error: {e}")
-            raise e
-        else:
-            while not self.ready:
-                await asyncio.sleep(0.2)
-                self.ready = self.app._dom_ready  # type: ignore[unused-ignore]
-                if not self.ready:
-                    self.log("DOM not ready yet. Retrying...")
-
-            self.log.debug("DOM is ready.")
-
-            self.client.connect(self.host, self.port, keepalive=60)
-            while (not get_current_worker().is_cancelled):
-                self.client.loop()
+        self.client.connect_async(self.host, self.port)
+        while (not get_current_worker().is_cancelled):
+            self.client.loop_forever(retry_first_connection=True)
 
     def on_connect(self, client: mqtt.Client, userdata, flags, rc):
         for topic in self.subscribers:
@@ -149,7 +136,6 @@ class MqttMessageSubscription(MqttSubscription):
             self.payload = payload
 
     def on_mount(self) -> None:
-        return
         # subscribe to MqttClient
         client = self.client()
         if client:
@@ -163,13 +149,6 @@ class MqttMessageSubscription(MqttSubscription):
 
     def on_message(self, client, userdata, msg: mqtt.MQTTMessage):
         self.post_message(self.MqttMessageEvent(self, msg.topic, msg.payload.decode()))
-
-    def on_ready(self):
-        # subscribe to MqttClient
-        client = self.client()
-        if client:
-            client.subscribe(self.pattern, None, self.on_message)
-
 
 class MqttConnectionSubscription(MqttSubscription):
     class MqttConnected(MqttEvent): pass
